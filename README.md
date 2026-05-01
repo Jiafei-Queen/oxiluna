@@ -17,17 +17,6 @@ A tiny **Lua‑to‑Rust** build helper. It lets you write a Lua entry‑point (
 - A recent version of the `mlua` crate (handled by `Cargo.toml`).
 - Unix‑like tools (`pwd`, `ls`, `mkdir`, `rm`, `cp`, `mv`) on Windows the script falls back to their equivalents.
 
-## Building the helper
-```bash
-# Clone the repo (if you haven't already)
-git clone <repo‑url>
-cd oxiluna
-
-# Build the Rust binary in release mode
-cargo build --release
-```
-The resulting binary is placed at `target/release/oxiluna`.
-
 ## Very Quickstart!!!
 ```bash
 # Basic usage: <script.lua> [module.lua ...] [-o <output>] [-t <target>]
