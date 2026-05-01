@@ -1,4 +1,10 @@
 /target
+# IDE & Editor
+.vscode/
+.idea/
+# macOS
 .DS_Store
 ._*
-.idea/*
+# temp_dir & temp_file
+src/lua
+test
