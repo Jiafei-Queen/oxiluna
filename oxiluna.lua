@@ -94,10 +94,10 @@ use mlua::Lua;
 
 fn replace_shebang(code: &str) -> &str {
     if code.starts_with("#!") {
-        if let Some(pos) = code.find('\n') {
-            return &code[pos..];
+        return if let Some(pos) = code.find('\n') {
+            &code[pos..]
         } else {
-            return "";
+            ""
         }
     }
     code
@@ -105,6 +105,7 @@ fn replace_shebang(code: &str) -> &str {
 
 fn main() -> mlua::Result<()> {
     let lua = Lua::new();
+
 %s
     Ok(())
 }]]
