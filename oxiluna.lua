@@ -117,7 +117,7 @@ for _,v in ipairs(modules) do
 	sentences = sentences..LOAD_SENTENCE:format(v:match("[^/\\]+$"))
 end
 
-sentences = sentences..LOAD_SENTENCE:format(main:match("[^/\\]+$")
+sentences = sentences..LOAD_SENTENCE:format(main:match("[^/\\]+$"))
 
 local RS_PATH = fs.join(CWD, "/src/main.rs")
 local rs = TEMPLATE:format(sentences)
