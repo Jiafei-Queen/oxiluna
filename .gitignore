@@ -6,5 +6,5 @@
 .DS_Store
 ._*
 # temp_dir & temp_file
-/src/lua
+/src/*
 test
