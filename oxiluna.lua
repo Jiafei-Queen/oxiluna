@@ -110,14 +110,38 @@ fn main() -> mlua::Result<()> {
     Ok(())
 }]]
 
-local LOAD_SENTENCE = '\tlua.load(replace_shebang(include_str!("lua/%s"))).exec()?;\n'
+local MODULE_SENTENCE = [[
+    preload.set(
+        "%s", lua.load(
+            replace_shebang(include_str!("lua/%s"))
+        ).into_function()?
+    )?;
 
-local sentences = ""
-for _,v in ipairs(modules) do
-	sentences = sentences..LOAD_SENTENCE:format(v:match("[^/\\]+$"))
+]]
+
+local MAIN_SENTENCE = [[
+    lua.load(replace_shebang(include_str!("lua/%s"))).exec()?;
+]]
+
+local sentences
+
+if #modules == 0 then
+	sentences = ""
+else
+sentences = [[
+    let globals = lua.globals();
+    let package: mlua::Table = globals.get("package")?;
+    let preload: mlua::Table = package.get("preload")?;
+
+]]
 end
 
-sentences = sentences..LOAD_SENTENCE:format(main:match("[^/\\]+$"))
+for _,v in ipairs(modules) do
+	local filename = v:match("[^/\\]+$")
+	sentences = sentences..MODULE_SENTENCE:format(filename:gsub('.lua', ''), filename)
+end
+
+sentences = sentences..MAIN_SENTENCE:format(main:match("[^/\\]+$"))
 
 local RS_PATH = fs.join(CWD, "/src/main.rs")
 local rs = TEMPLATE:format(sentences)
