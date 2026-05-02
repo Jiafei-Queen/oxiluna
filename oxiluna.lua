@@ -1,5 +1,5 @@
 #!/usr/bin/env lua
-local fs = require("fs")
+local fs = dofile("fs.lua")
 local unix = not os.getenv("USERPROFILE")
 
 local CWD = os.getenv("OXILUNA_HOME")
