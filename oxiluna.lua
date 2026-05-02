@@ -172,11 +172,28 @@ local ok = os.execute(
 	('%s && cargo build --release %s'):format(fs.cd(CWD), target_option)
 )
 
-local release
+local release_dir
 if target then
-	release = fs.join(CWD, "/target/", target, "/release", "/oxiluna")
+	release_dir = fs.join(CWD, "/target/", target, "/release")
 else
-	release = fs.join(CWD, "/target", "/release", "/oxiluna")
+	release_dir = fs.join(CWD, "/target", "/release")
+end
+
+local release
+for _,v in ipairs(fs.ls(release_dir)) do
+	if v == "oxiluna" or v == "oxiluna.exe" then
+		release = fs.join(release_dir, v)
+		break
+	end
+end
+
+if release then
+	if release:match("%.exe$") then
+		output = output..".exe"
+	end
+else
+	io.stderr:write(('oxiluna: release not found at `%s`\n'):format(release_dir))
+	return
 end
 
 if ok then
