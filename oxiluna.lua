@@ -114,10 +114,10 @@ local LOAD_SENTENCE = '\tlua.load(replace_shebang(include_str!("lua/%s"))).exec(
 
 local sentences = ""
 for _,v in ipairs(modules) do
-	sentences = sentences..LOAD_SENTENCE:format(v)
+	sentences = sentences..LOAD_SENTENCE:format(v:match("[^/\\]+$"))
 end
 
-sentences = sentences..LOAD_SENTENCE:format(main)
+sentences = sentences..LOAD_SENTENCE:format(main:match("[^/\\]+$")
 
 local RS_PATH = fs.join(CWD, "/src/main.rs")
 local rs = TEMPLATE:format(sentences)
@@ -134,9 +134,9 @@ end
 fs.rm(LUA_PATH)
 fs.mkdir(LUA_PATH)
 
-fs.cp(main, fs.join(LUA_PATH, main))
+fs.cp(main, fs.join(LUA_PATH, main:match("[^/\\]+$")))
 for _,v in ipairs(modules) do
-	fs.cp(v, fs.join(LUA_PATH, v))
+	fs.cp(v, fs.join(LUA_PATH, v:match("[^/\\]+$")))
 end
 
 local target_option = ""
