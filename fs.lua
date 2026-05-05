@@ -1,11 +1,54 @@
 local G = {}
 local unix = not os.getenv("USERPROFILE")
 
+local function sh_quote(path)
+    return "'" .. tostring(path):gsub("'", [['"'"']]) .. "'"
+end
+
+local function exec_ok(cmd)
+    local ok, why, code = os.execute(cmd)
+    if ok == true then
+        return true
+    end
+
+    if type(ok) == "number" then
+        return ok == 0
+    end
+
+    return why == "exit" and code == 0
+end
+
+local function win_quote(path)
+    return '"' .. tostring(path):gsub('"', '""') .. '"'
+end
+
+local function shell_quote(path)
+    if unix then
+        return sh_quote(path)
+    end
+    return win_quote(path)
+end
+
+local function wrap_cmd(cmd)
+    if unix then
+        return cmd
+    end
+    return "cmd /d /c " .. win_quote(cmd)
+end
+
+local function exec(cmd)
+    return exec_ok(wrap_cmd(cmd))
+end
+
+local function popen(cmd)
+    return assert(io.popen(wrap_cmd(cmd)))
+end
+
 --- [ 获得工作目录 ] ---
 function G.cwd()
     local cmd = unix and "pwd" or "cd"
-    local handle = io.popen(cmd)
-    local result = handle:read("*a"):gsub("\n$", "")
+    local handle = popen(cmd)
+    local result = handle:read("*a"):gsub("[\r\n]+$", "")
     handle:close()
     return result
 end
@@ -13,10 +56,15 @@ end
 --- [ 等同于 `ls -A` ] ---
 function G.ls(path)
     path = path or "."
-    local cmd = unix and "ls -A %q" or "dir %q /b /a"
+    local cmd
+    if unix then
+        cmd = "ls -A " .. shell_quote(path)
+    else
+        cmd = "dir " .. shell_quote(path) .. " /b /a"
+    end
 
     local files = {}
-    for file in io.popen(cmd:format(path)):lines() do
+    for file in popen(cmd):lines() do
         table.insert(files, file)
     end
 
@@ -25,10 +73,16 @@ end
 
 --- [ 检测路径是 **可读文件** 还是 **目录** 或是 **不存在或没有权限** ] ---
 function G.test(path)
-    local is_dir = os.execute(unix and ("test -d %q"):format(path)
-    or ("if exist %q\\ exit 0 else exit 1"):format(path))
+    local is_dir
+    if unix then
+        is_dir = exec("test -d " .. shell_quote(path))
+    else
+        -- Windows 下用 `path\NUL` 判断目录是否存在。
+        -- 这里必须把 `\NUL` 放在引号内部，避免空格路径被 cmd 错误拆分。
+        is_dir = exec("if exist " .. shell_quote(path .. "\\NUL") .. " (exit /b 0) else (exit /b 1)")
+    end
 
-    if is_dir == 0 or is_dir == true then
+    if is_dir then
         return "dir"
     end
 
@@ -61,11 +115,10 @@ end
 --- [ 等同于 `mkdir -p` ] ---
 function G.mkdir(path)
     if unix then
-        return os.execute(('mkdir -p %q'):format(path))
+        return os.execute("mkdir -p " .. shell_quote(path))
     else
-    -- Windows 直接用引号包裹路径即可
-    -- 加上双引号是为了处理路径中的空格
-        return os.execute(('mkdir %q 2>nul'):format(path))
+        -- cmd 的 mkdir 本身支持递归创建中间目录。
+        return os.execute(wrap_cmd("mkdir " .. shell_quote(path) .. " 2>nul"))
     end
 end
 
@@ -77,17 +130,16 @@ function G.rm(path)
 
     local cmd
     if unix then
-        cmd = ("rm -rf %q"):format(path)
+        cmd = "rm -rf " .. shell_quote(path)
     else
         if mode == "dir" then
-            cmd = ("rd /s /q %q"):format(path)
+            cmd = "rd /s /q " .. shell_quote(path)
         else
-            cmd = ("del /f /q %q"):format(path)
+            cmd = "del /f /q " .. shell_quote(path)
         end
     end
 
-    local ok, _, code = os.execute(cmd)
-    return ok == 0 or ok == true
+    return exec(cmd)
 end
 
 --- [ 等同于 `cp -r` ] ---
@@ -99,23 +151,21 @@ function G.cp(src, dst)
 
     local cmd
     if unix then
-    -- Unix: 直接使用 cp -r
-        cmd = ("cp -r %q %q"):format(src, dst)
+        cmd = "cp -r " .. shell_quote(src) .. " " .. shell_quote(dst)
     else
-    -- Windows:
         if mode == "dir" then
-        -- /E 复制目录和子目录（包括空目录）
-        -- /I 如果目标不存在且在复制多个文件，则假定目标必须是目录
-        -- /Y 取消覆盖确认
-            cmd = ("xcopy %q %q /E /I /Y >nul"):format(src, dst)
+            -- 目录复制显式追加 `\`，避免 xcopy 把目标误判成文件名。
+            cmd = "xcopy "
+                .. shell_quote(src .. "\\")
+                .. " "
+                .. shell_quote(dst .. "\\")
+                .. " /E /I /Y >nul"
         else
-        -- 如果是单个文件，使用 copy /y
-            cmd = ("copy /y %q %q >nul"):format(src, dst)
+            cmd = "copy /y " .. shell_quote(src) .. " " .. shell_quote(dst) .. " >nul"
         end
     end
 
-    local ok, _, code = os.execute(cmd)
-    return ok == 0 or ok == true
+    return exec(cmd)
 end
 
 --- [ 构造切换目录的命令前缀 ] ---
@@ -126,10 +176,10 @@ function G.cd(path)
     -- 在 Windows 中，单纯的 cd 无法跨盘符，需要 /d 参数
     local cmd
     if unix then
-        cmd = ("cd %q"):format(path)
+        cmd = "cd " .. shell_quote(path)
     else
-    -- /d 确保可以从 C: 切换到 D:
-        cmd = ("cd /d %q"):format(path)
+        -- /d 确保可以从 C: 切换到 D:
+        cmd = "cd /d " .. shell_quote(path)
     end
 
     return cmd
@@ -141,36 +191,31 @@ end
 function G.mv(src, dst)
 -- 1. 首先尝试使用 Lua 的原生函数 (原子操作，速度最快)
 -- 注意：这在跨分区/跨硬盘移动时可能会失败
-    local success, err = os.rename(src, dst)
+    local success = os.rename(src, dst)
     if success then return true end
 
     -- 2. 如果原生失败，则调用系统命令行
     local cmd
     if unix then
-    -- Unix: mv 默认支持跨分区移动
-        cmd = ("mv %q %q"):format(src, dst)
+        cmd = "mv " .. shell_quote(src) .. " " .. shell_quote(dst)
     else
-    -- Windows:
         local mode = G.test(src)
         if not mode then return false, "Source does not exist" end
 
         if mode == "dir" then
-        -- move 命令在 Windows 跨盘符移动目录时表现很差
-        -- 稳妥做法：先复制再删除 (模拟 mv 的跨盘行为)
+            -- move 命令在 Windows 跨盘符移动目录时表现很差。
+            -- 这里退化成 copy + rm，保证跨盘可用。
             if G.cp(src, dst) then
-                return G.remove(src)
+                return G.rm(src)
             else
                 return false
             end
         else
-        -- 移动文件使用 move /y (覆盖模式)
-            cmd = ("move /y %q %q >nul"):format(src, dst)
+            cmd = "move /y " .. shell_quote(src) .. " " .. shell_quote(dst) .. " >nul"
         end
     end
 
-    local ok, _, code = os.execute(cmd)
-    return ok == 0 or ok == true
+    return exec(cmd)
 end
 
 return G
-
