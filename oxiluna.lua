@@ -31,7 +31,7 @@ end
 local main = args[1]
 -- 检验输入文件是否存在
 if fs.test(main) ~= "file" then
-	io.stderr:write(("oxiluna: no such main file: %s\n"):format())
+	io.stderr:write(("oxiluna: no such main file: %s\n"):format(main))
 	return
 end
 
