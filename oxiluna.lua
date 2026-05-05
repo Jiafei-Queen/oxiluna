@@ -31,7 +31,7 @@ end
 local main = args[1]
 -- 检验输入文件是否存在
 if fs.test(main) ~= "file" then
-	io.stderr:write(("oxiluna: no such main file: %s\n"):format(main))
+	io.stderr:write(("oxiluna: So such main file: %s\n"):format(main))
 	return
 end
 
@@ -152,6 +152,7 @@ if handle then
 	handle:close()
 else
 	io.stderr:write(("oxiluna: cannot write rs file: %s\n"):format(RS_PATH))
+	return
 end
 
 --- [ 拷贝主与模块文件 ] ---
