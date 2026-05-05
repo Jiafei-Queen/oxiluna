@@ -188,11 +188,7 @@ for _,v in ipairs(fs.ls(release_dir)) do
 	end
 end
 
-if release then
-	if release:match("%.exe$") then
-		output = output..".exe"
-	end
-else
+if not release then
 	io.stderr:write(('oxiluna: release not found at `%s`\n'):format(release_dir))
 	return
 end
