@@ -65,7 +65,7 @@ for i,v in ipairs(args) do
 	else
 		-- 检验模块文件
 		if fs.test(v) == "file" then
-			table.insert(modules, v)
+			table.insert(modules, {path = v, modname = v:match("[^/\\]+$"):gsub('%.lua$', '')})
 		else
 			io.stderr:write(("oxiluna: no such module file: %s\n"):format(v))
 			return
@@ -86,6 +86,88 @@ print(output)
 -- 检验输出文件路径
 if fs.test(output) == "dir" then
 	io.stderr:write(('oxiluna: output is a dir: %s\n'):format(output))
+end
+
+--- [ 自动检测 require 语句 ] ---
+
+local function parse_requires(source)
+	local requires = {}
+	for mod in source:gmatch('require%s*%("([^"]+)"%)') do
+		requires[mod] = true
+	end
+	for mod in source:gmatch("require%s*%('([^']+)'%)") do
+		requires[mod] = true
+	end
+	return requires
+end
+
+local function dotted_path(name)
+	return name:gsub("%.", unix and "/" or "\\")
+end
+
+local function search_module(modname, search_paths)
+	local path_part = dotted_path(modname)
+	for pattern in search_paths:gmatch("[^;]+") do
+		local filepath = pattern:gsub("%?", path_part)
+		if fs.test(filepath) == "file" then
+			return filepath
+		end
+	end
+	return nil
+end
+
+-- 递归发现所有依赖的 Lua 模块
+local discovered = {}
+local c_warnings = {}
+local scanned = {}
+local queue = {main}
+
+for _, mod in ipairs(modules) do
+	queue[#queue + 1] = mod.path
+end
+
+while #queue > 0 do
+	local fp = table.remove(queue)
+	if scanned[fp] then goto skip end
+	scanned[fp] = true
+
+	local f = io.open(fp, "r")
+	if not f then goto skip end
+	local source = f:read("*a")
+	f:close()
+
+	for modname, _ in pairs(parse_requires(source)) do
+		if not discovered[modname] then
+			local lua_file = search_module(modname, package.path)
+			if lua_file then
+				discovered[modname] = lua_file
+				queue[#queue + 1] = lua_file
+			else
+				local c_file = search_module(modname, package.cpath)
+				if c_file then
+					c_warnings[modname] = c_file
+				end
+			end
+		end
+	end
+	:: skip ::
+end
+
+for modname, filepath in pairs(c_warnings) do
+	io.stderr:write(("oxiluna: warning: '%s' requires C dynamic library (%s), cannot embed\n"):format(modname, filepath))
+end
+
+-- 将自动发现的模块加入构建
+local existing_modnames = {}
+for _, mod in ipairs(modules) do
+	existing_modnames[mod.modname] = true
+end
+
+for modname, filepath in pairs(discovered) do
+	if not existing_modnames[modname] then
+		table.insert(modules, {path = filepath, modname = modname})
+		io.stderr:write(("oxiluna: auto-included module '%s'\n"):format(modname))
+	end
 end
 
 --- [ 拼接并写入 Rust 代码 ] ---
@@ -136,9 +218,9 @@ sentences = [[
 ]]
 end
 
-for _,v in ipairs(modules) do
-	local filename = v:match("[^/\\]+$")
-	sentences = sentences..MODULE_SENTENCE:format(filename:gsub('.lua', ''), filename)
+for _, mod in ipairs(modules) do
+	local relpath = mod.modname:gsub("%.", unix and "/" or "\\") .. ".lua"
+	sentences = sentences .. MODULE_SENTENCE:format(mod.modname, relpath)
 end
 
 sentences = sentences..MAIN_SENTENCE:format(main:match("[^/\\]+$"))
@@ -160,8 +242,12 @@ fs.rm(LUA_PATH)
 fs.mkdir(LUA_PATH)
 
 fs.cp(main, fs.join(LUA_PATH, main:match("[^/\\]+$")))
-for _,v in ipairs(modules) do
-	fs.cp(v, fs.join(LUA_PATH, v:match("[^/\\]+$")))
+for _, mod in ipairs(modules) do
+	local relpath = mod.modname:gsub("%.", unix and "/" or "\\") .. ".lua"
+	local dst = fs.join(LUA_PATH, relpath)
+	local dir = dst:match("^(.*[/\\])")
+	if dir then fs.mkdir(dir) end
+	fs.cp(mod.path, dst)
 end
 
 local target_option = ""
