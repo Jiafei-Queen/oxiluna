@@ -1,18 +1,18 @@
 #!/usr/bin/env lua
-local fs = dofile("fs.lua")
-local unix = not os.getenv("USERPROFILE")
-
 local CWD = os.getenv("OXILUNA_HOME")
 if not CWD then
-	local hint = unix and
-	"export OXILUNA_HOME=/path/to/oxiluna" or
-	"set OXILUNA_HOME=C:\\path\\to\\oxiluna"
-
-	io.stderr:write("Error: OXILUNA_HOME environment variable is not set.\n")
-	io.stderr:write("Please set it to the root directory of the oxiluna project.\n")
-	io.stderr:write("Example: " .. hint .. "\n")
-	os.exit(1)
+    io.stderr:write("Error: OXILUNA_HOME environment variable is not set.\n")
+    io.stderr:write("Please set it to the root directory of the oxiluna project.\n")
+    io.stderr:write("Example: \n")
+    io.stderr:write("\texport OXILUNA_HOME=/path/to/oxiluna\n")
+    io.stderr:write("\tset OXILUNA_HOME=C:\\path\\to\\oxiluna")
+    os.exit(1)
 end
+
+dofile(CWD..'/script/fetch_lunax.lua')
+
+local fs = dofile(CWD..'/lunax/fs.lua')
+local exec = dofile(CWD..'/lunax/exec.lua')
 
 local LUA_PATH = fs.join(CWD, "src", "lua")
 local RS_PATH = fs.join(CWD, "src", "main.rs")
@@ -30,7 +30,7 @@ end
 
 local main = args[1]
 -- 检验输入文件是否存在
-if fs.test(main) ~= "file" then
+if not fs.test(main, 'FILE') then
 	io.stderr:write(("oxiluna: So such main file: %s\n"):format(main))
 	return
 end
@@ -64,7 +64,7 @@ for i,v in ipairs(args) do
 		end
 	else
 		-- 检验模块文件
-		if fs.test(v) == "file" then
+		if fs.test(v, 'FILE') then
 			table.insert(modules, {path = v, modname = v:match("[^/\\]+$"):gsub('%.lua$', '')})
 		else
 			io.stderr:write(("oxiluna: no such module file: %s\n"):format(v))
@@ -75,18 +75,12 @@ for i,v in ipairs(args) do
 	:: continue ::
 end
 
-output = output or main:gsub("%.[^%.]+$", unix and "" or ".exe")
-
 --[[
 print(main)
 print(table.concat(modules, ", "))
 print(output)
 ]]--
 
--- 检验输出文件路径
-if fs.test(output) == "dir" then
-	io.stderr:write(('oxiluna: output is a dir: %s\n'):format(output))
-end
 
 --- [ 自动检测 require 语句 ] ---
 
@@ -172,8 +166,6 @@ end
 
 --- [ 拼接并写入 Rust 代码 ] ---
 local TEMPLATE = [[
-use mlua::Lua;
-
 fn replace_shebang(code: &str) -> &str {
     if code.starts_with("#!") {
         return if let Some(pos) = code.find('\n') {
@@ -186,7 +178,22 @@ fn replace_shebang(code: &str) -> &str {
 }
 
 fn main() -> mlua::Result<()> {
-    let lua = Lua::new();
+    let lua = mlua::Lua::new();
+    let globals = lua.globals();
+
+    let args: Vec<String> = std::env::args().collect();
+
+    let arg_table = lua.create_table()?;
+    for (i, arg) in args.iter().enumerate() {
+        arg_table.set(i as i32, arg.clone())?;
+    }
+
+    globals.set("arg", arg_table)?;
+
+    let mut lua_args = mlua::MultiValue::new();
+    for arg in args.iter().skip(1) {
+        lua_args.push_back(mlua::Value::String(lua.create_string(arg)?));
+    }
 
 %s
     Ok(())
@@ -202,7 +209,7 @@ local MODULE_SENTENCE = [[
 ]]
 
 local MAIN_SENTENCE = [[
-    lua.load(replace_shebang(include_str!("lua/%s"))).exec()?;
+    lua.load(replace_shebang(include_str!("lua/%s"))).call::<()>(lua_args)?;
 ]]
 
 local sentences
@@ -211,7 +218,6 @@ if #modules == 0 then
 	sentences = ""
 else
 sentences = [[
-    let globals = lua.globals();
     let package: mlua::Table = globals.get("package")?;
     let preload: mlua::Table = package.get("preload")?;
 
@@ -255,9 +261,9 @@ if target then
 	target_option = "--target "..target
 end
 
-local ok = os.execute(
-	('%s && cargo build --release %s'):format(fs.cd(CWD), target_option)
-)
+local ok = exec(('cargo build --release %s'):format(target_option), {
+    cwd = CWD
+})
 
 local release_dir
 if target then
@@ -269,6 +275,15 @@ end
 local release
 for _,v in ipairs(fs.ls(release_dir)) do
 	if v == "oxiluna" or v == "oxiluna.exe" then
+        if not output then
+            local name = main:gsub('%.lua$', '')
+            if v:sub(-3) == 'exe' then
+                name = name..'.exe'
+            end
+
+            output = name
+        end
+
 		release = fs.join(release_dir, v)
 		break
 	end
@@ -279,6 +294,11 @@ if not release then
 	return
 end
 
+-- 检验输出文件路径
+if fs.test(output, 'DIR') then
+	io.stderr:write(('oxiluna: output is a dir: %s\n'):format(output))
+end
+
 if ok then
-	fs.cp(release, fs.join(fs.cwd(), output))
+	fs.cp(release, fs.join(fs.cwd, output))
 end
